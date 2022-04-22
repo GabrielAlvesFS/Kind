@@ -10,7 +10,6 @@ VoxBox.Draw.circle(
   let z = I32.to_u32(z)
 	let x = +0#32
   let y = r
-  log(I32.show(r))
 	let d = +3#32 - (+2#32 * r)
 	let img = VoxBox.Draw.circle.all_sides(xc, yc, x, y, z, col, img)
 	VoxBox.Draw.circle.go(x, y, d, xc, yc, z, col, img)
@@ -28,12 +27,10 @@ VoxBox.Draw.circle.go(
   if y >=? x then
     let {y, d} = 
       if d >? 0 then
-        log(" D: " | I32.show(d) | " X: "| I32.show(x) | " Y: " |I32.show(y))
         let d = d + (4 * (x - y)) + 10
         let y = y - 1
         {y, d}
       else
-        log(" D: " | I32.show(d) | " X: "| I32.show(x) | " Y: " |I32.show(y))
         let d = d + (4 * x) + 6
         {y, d}
     let x = x + 1
