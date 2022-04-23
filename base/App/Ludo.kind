@@ -7,12 +7,15 @@ type App.Ludo.State.Local {
     random: Nat
     dice: App.Ludo.Dice
     trail: App.Ludo.Trail
+    mouse_pos: Pair<U32, U32>
+    mouse_over: String
+    team: App.Ludo.Team
   )
 }
 
 type App.Ludo.Dice {
   new(
-    rolling: U64
+    rolling: Maybe<U64>
     seed: Nat
   )
 }
@@ -85,6 +88,9 @@ App.Ludo.Team.read(team: String): Maybe<App.Ludo.Team>
 App.Ludo.tile_size: Pair<U32, U32>
   {40, 40}
 
+App.Ludo.scale: U32
+  2#32
+  
 App.Ludo.board_size: Pair<U32, U32>
   {15, 15}
   
@@ -458,8 +464,28 @@ App.Ludo.Move(coord: App.Ludo.Coord, mp: Nat, team: App.Ludo.Team, map: App.Ludo
         trail: App.Ludo.Tile.trail(tile.class, List.delete_el!(App.Ludo.Team.eql, team, tile.pieces))
       } default tile
     let map = App.Ludo.Map.modify(f1, coord, map)
-    let new_coord = App.Ludo.Trail.get(coord, trail)
+
+    let tile = App.Ludo.Map.get(coord, map)
+    without tile: map 
+    let exclusives = App.Ludo.exclusive_tiles 
+    let get_first_exclusive = (str: String)
+          List.head!(exclusives{str} <> [])
+    // let new_coord = App.Ludo.Trail.get(coord, trail)
+    let new_coord = case tile {
+      trail: case tile.class {
+        door: case tile.class.team {
+          blue: get_first_exclusive("blue")
+          red: get_first_exclusive("red")
+          green: get_first_exclusive("green")
+          yellow: get_first_exclusive("yellow")
+        }
+      }default App.Ludo.Trail.get(coord, trail)
+    }default App.Ludo.Trail.get(coord, trail)
+
     without new_coord: map
+    log(Pair.show!!(U32.show, U32.show, new_coord))
+
+    
     let f2 = (tile: App.Ludo.Tile)
       case tile {
         trail: App.Ludo.Tile.trail(tile.class, team & tile.pieces)
@@ -562,7 +588,7 @@ App.Ludo.Map.init: App.Ludo.Map
   let map = App.Ludo.Map.set(super_tiles{"yellow"} <> {0, 0}, yellow_super, map)
   let map = App.Ludo.Map.set(super_tiles{"green"} <> {0, 0}, green_super, map)
   
-  let map = App.Ludo.Map.set({0,6}, App.Ludo.Tile.trail(App.Ludo.Tile.Trail.common, [App.Ludo.Team.red, App.Ludo.Team.red, App.Ludo.Team.red, App.Ludo.Team.blue]), map)
+  let map = App.Ludo.Map.set({0,8}, App.Ludo.Tile.trail(App.Ludo.Tile.Trail.common, [App.Ludo.Team.red, App.Ludo.Team.red, App.Ludo.Team.red, App.Ludo.Team.blue]), map)
   // let map = App.Ludo.Map.set({1,6}, App.Ludo.Tile.trail(App.Ludo.Tile.Trail.star(some(App.Ludo.Team.blue)), [App.Ludo.Team.red, App.Ludo.Team.blue]), map)
 
 
@@ -589,15 +615,23 @@ App.Ludo.Trail.init: App.Ludo.Trail
   let trail = set_trail_order(App.Ludo.star_trail,      trail)
   let trail = set_trail_order(App.Ludo.diagonals_trail,      trail)
   trail
+
+App.Ludo.mouse_to_coord(mouse_pos: Pair<U32, U32>): App.Ludo.Coord
+  let scale = App.Ludo.scale 
+  let tile_size = App.Ludo.tile_size
+  {mouse_pos@fst/(tile_size@fst * scale), mouse_pos@snd/(tile_size@snd * scale)}
+
   
 // Initial state
 App.Ludo.init: App.Init<App.Ludo.State>
-  let board = App.Ludo.Map.init
-  let random = 0
-  let dice = App.Ludo.Dice.new(0,0)
-  let trail = App.Ludo.Trail.init
-  let board = App.Ludo.Move({0, 6}, 32, App.Ludo.Team.red, board, trail)
-  App.Store.new<App.Ludo.State>(App.Ludo.State.Local.new(board, random, dice, trail), unit)
+  let board      = App.Ludo.Map.init
+  let random     = 0
+  let dice       = App.Ludo.Dice.new(none,0)
+  let trail      = App.Ludo.Trail.init
+  let mouse_pos  = {0,0}
+  let mouse_over = ""
+  let team       = App.Ludo.Team.blue
+  App.Store.new<App.Ludo.State>(App.Ludo.State.Local.new(board, random, dice, trail, mouse_pos, mouse_over, team), unit)
 
 App.Ludo.draw(img: VoxBox): App.Draw<App.Ludo.State>
   (state)
@@ -646,7 +680,7 @@ App.Ludo.draw(img: VoxBox): App.Draw<App.Ludo.State>
               "id": "game_screen",
               "width": U32.show(App.Ludo.tile_size@fst * 15),
               "height": U32.show(App.Ludo.tile_size@snd * 15),
-              "scale": "2"
+              "scale": U32.show(App.Ludo.scale)
             }, {}, new_img)
         }
         <div style =
@@ -657,32 +691,72 @@ App.Ludo.draw(img: VoxBox): App.Draw<App.Ludo.State>
         </div>
     </div>
 
+App.Ludo.when.move(team: App.Ludo.Team, coord: App.Ludo.Coord, local: App.Ludo.State.Local): App.Ludo.State.Local
+  log("aaaaaa")
+  let dice = local@dice
+  let rolling = dice@rolling
+  without rolling: local
+  if rolling =? 0 then
+    let board = App.Ludo.Move(coord, (dice@seed % 6) + 1, team, local@board, local@trail)
+    let dice  = dice@rolling <- none
+    let local = local@dice <- dice
+    let local = local@board <- board
+    local
+  else
+    local
+
+App.Ludo.when.update_dice(local: App.Ludo.State.Local): App.Ludo.State.Local
+  let dice = local@dice
+  let dice = 
+    let rolling = dice@rolling
+    without rolling: dice
+    if rolling =? 0 then
+      dice
+    else
+      let dice = dice@rolling <- some(rolling - 1)
+      let dice = dice@seed <- Nat.random(dice@seed)
+      dice
+  local@dice <- dice
+
 // Event handler
 App.Ludo.when: App.When<App.Ludo.State>
   (event, state)
   let local = state@local
   let dice = local@dice
+  let mouse_pos = local@mouse_pos
   case event {
+
     mouse_click:
       log(event.id)
       switch String.eql(event.id) {
         "dice_roll":
-          let dice = dice@rolling <- 120#64
+          let dice = dice@rolling <- some(120#64)
           let dice = dice@seed <- (local@random * 7)
           let local = local@dice <- dice
           App.set_local!(local)
       } default App.pass!
+
+    mouse_down:
+      switch String.eql(local@mouse_over) {
+        "game_screen": 
+          log("game_screen")
+           let coord = App.Ludo.mouse_to_coord(local@mouse_pos)
+           let local = App.Ludo.when.move(local@team, coord, local)
+           App.set_local!(local)
+      } default App.pass! 
+
+    mouse_move:
+      let local = local@mouse_pos <- event.mouse_pos
+      App.set_local!(local)
+
+    mouse_over: 
+      let local = local@mouse_over <- event.id 
+      App.set_local!(local)
+
     frame:
-      let dice =
-        if dice@rolling =? 0 then
-          dice
-        else
-          let dice = dice@rolling <- dice@rolling - 1
-          let dice = dice@seed <- Nat.random(dice@seed)
-          dice
+      let local = App.Ludo.when.update_dice(local)
       let random = Nat.random(local@random)
       let local = local@random <- random
-      let local = local@dice <- dice
       App.set_local!(local)
   } default App.pass!
 
